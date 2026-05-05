@@ -1,5 +1,5 @@
 // App.js 전체 코드 (기간 필터링 기능 탑재 최종 버전)
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
 
 // ==========================================
