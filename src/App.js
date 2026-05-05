@@ -1,6 +1,5 @@
-// App.js 전체 코드 (기간 필터링 기능 탑재 최종 버전)
-import React, { useState } from 'react';
-import { GoogleOAuthProvider, useGoogleLogin } from '@react-oauth/google';
+// App.js 전체 코드 (리디렉션 로그인 적용 버전 - 팝업 차단 100% 우회)
+import React, { useState, useEffect } from 'react';
 
 // ==========================================
 // 1. 기본 설정 (시트 정보)
@@ -17,14 +16,33 @@ function DollarInvestApp() {
   const [buyData, setBuyData] = useState([]); 
   const [sellData, setSellData] = useState([]); 
 
-  const login = useGoogleLogin({
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    onSuccess: (tokenResponse) => {
-      setAccessToken(tokenResponse.access_token);
-      fetchSheetData(tokenResponse.access_token); 
-    },
-    onError: () => alert('구글 로그인에 실패했습니다. 팝업 차단을 확인해주세요.'),
-  });
+  // 화면이 처음 켜질 때, 구글에서 돌아온 화면인지(주소창에 토큰이 있는지) 확인하는 로직
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash) {
+      const params = new URLSearchParams(hash.replace('#', '?'));
+      const token = params.get('access_token');
+      if (token) {
+        setAccessToken(token);
+        
+        // 데이터 불러오기
+        const fetchData = async () => {
+          try {
+            const buyRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/매수기록!A3:J`, { headers: { Authorization: `Bearer ${token}` } });
+            const sellRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/매도기록!A3:G`, { headers: { Authorization: `Bearer ${token}` } });
+            const buyJson = await buyRes.json();
+            const sellJson = await sellRes.json();
+            setBuyData(buyJson.values ? buyJson.values.filter(r => r[0] && r[0].trim() !== '') : []); 
+            setSellData(sellJson.values ? sellJson.values.filter(r => r[0] && r[0].trim() !== '') : []);
+          } catch (error) { console.error("데이터 읽기 실패", error); }
+        };
+        fetchData();
+
+        // 지저분한 주소창의 토큰 정보를 깔끔하게 지워줌
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+  }, []);
 
   const fetchSheetData = async (token) => {
     try {
@@ -44,6 +62,12 @@ function DollarInvestApp() {
     return parseFloat(originalAmount) - totalSold;
   };
 
+  // ★ 팝업 우회: 노션처럼 화면을 완전히 구글 로그인 페이지로 이동시키는 함수
+  const handleDirectLogin = () => {
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&redirect_uri=${window.location.origin}&response_type=token&scope=https://www.googleapis.com/auth/spreadsheets`;
+    window.location.href = authUrl;
+  };
+
   // 비로그인 상태 화면
   if (!accessToken) {
     return (
@@ -51,7 +75,8 @@ function DollarInvestApp() {
         <div style={{ padding: '50px 30px', backgroundColor: 'white', border: '1px solid #E3E5E8', borderRadius: '12px', textAlign: 'center', width: '90%', maxWidth: '400px' }}>
           <h1 style={{ fontSize: '24px', fontWeight: '800', marginBottom: '10px', color: '#111111', letterSpacing: '-1px' }}>💰달러환테크 대시보드</h1>
           <p style={{ fontSize: '15px', color: '#666666', marginBottom: '40px', letterSpacing: '-0.5px' }}>개인 시트 연동을 위해 로그인해 주세요</p>
-          <button onClick={() => login()} style={{ width: '100%', padding: '16px', backgroundColor: '#03C75A', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' }}>
+          {/* 바뀐 로그인 함수 적용 */}
+          <button onClick={handleDirectLogin} style={{ width: '100%', padding: '16px', backgroundColor: '#03C75A', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '16px' }}>
             Google 계정으로 시작하기
           </button>
         </div>
@@ -243,26 +268,22 @@ function ActiveTab({ buyData, calculateRemaining }) {
 }
 
 // ==========================================
-// 6. 투자완료 탭 (★ 핵심 변경: 기간 필터링 기능 추가)
+// 6. 투자완료 탭 
 // ==========================================
 function CompletedTab({ buyData, sellData }) {
-  // 오늘 날짜 계산 (예: 2026, 05, 05)
   const today = new Date();
   const yyyy = String(today.getFullYear());
-  // JavaScript의 달(Month)은 0부터 시작하므로 반드시 +1을 해주어야 합니다.
   const mm = String(today.getMonth() + 1).padStart(2, '0');
   const dd = String(today.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}-${mm}-${dd}`;
 
-  // 필터 상태를 기억하는 상자(State)들
-  const [filterMode, setFilterMode] = useState('yearly'); // 기본값: 연별
-  const [filterYear, setFilterYear] = useState(yyyy); // 기본값: 올해(2026)
+  const [filterMode, setFilterMode] = useState('yearly'); 
+  const [filterYear, setFilterYear] = useState(yyyy); 
   const [filterMonth, setFilterMonth] = useState(`${yyyy}-${mm}`);
   const [filterDate, setFilterDate] = useState(todayStr);
   const [customStart, setCustomStart] = useState(`${yyyy}-01-01`);
   const [customEnd, setCustomEnd] = useState(todayStr);
 
-  // 1단계: 모든 매도 기록에 매수 정보를 매칭하여 '수익'을 먼저 계산해 둡니다.
   const allCompletedRecords = sellData.map(sell => {
     const matchedBuy = buyData.find(buy => buy[0] === sell[0]) || [];
     const buyRate = parseFloat(matchedBuy[3] || 0);
@@ -270,49 +291,31 @@ function CompletedTab({ buyData, sellData }) {
     const sellUsd = parseFloat(sell[3] || 0);
     const profit = (sellRate - buyRate) * sellUsd;
     const invested = buyRate * sellUsd;
-    return {
-      id: sell[0],
-      sellDate: sell[1] || '', // 매도일 기준
-      buyRate: matchedBuy[3],
-      sellRate: sell[2],
-      sellUsd: sell[3],
-      profit: profit,
-      invested: invested
-    };
+    return { id: sell[0], sellDate: sell[1] || '', buyRate: matchedBuy[3], sellRate: sell[2], sellUsd: sell[3], profit: profit, invested: invested };
   });
 
-  // 2단계: 사용자가 선택한 체(필터)에 맞춰 데이터를 거릅니다.
   const filteredRecords = allCompletedRecords.filter(record => {
-    const sDate = record.sellDate; // 엑셀에 적힌 매도일 (예: 2026-05-05)
-    if (!sDate) return false; // 날짜가 비어있으면 버림
+    const sDate = record.sellDate; 
+    if (!sDate) return false; 
     
-    if (filterMode === 'all') return true; // 누적: 모두 통과
-    if (filterMode === 'yearly') return sDate.startsWith(filterYear); // 연별: 2026으로 시작하는 것만
-    if (filterMode === 'monthly') return sDate.startsWith(filterMonth); // 월별: 2026-05로 시작하는 것만
-    if (filterMode === 'daily') return sDate === filterDate; // 일별: 정확히 일치하는 것만
-    if (filterMode === 'custom') return sDate >= customStart && sDate <= customEnd; // 직접설정: 날짜 사이에 있는 것만
+    if (filterMode === 'all') return true; 
+    if (filterMode === 'yearly') return sDate.startsWith(filterYear); 
+    if (filterMode === 'monthly') return sDate.startsWith(filterMonth); 
+    if (filterMode === 'daily') return sDate === filterDate; 
+    if (filterMode === 'custom') return sDate >= customStart && sDate <= customEnd; 
     return true;
   });
 
-  // 3단계: 체를 통과한 데이터들만 모아서 총수익과 총원금을 더합니다.
   let totalProfit = 0;
   let totalInvestedForSold = 0;
-  filteredRecords.forEach(record => {
-    totalProfit += record.profit;
-    totalInvestedForSold += record.invested;
-  });
+  filteredRecords.forEach(record => { totalProfit += record.profit; totalInvestedForSold += record.invested; });
 
-  // 네이버 증권 스타일 색상 적용
   const isProfit = totalProfit >= 0;
   const mainColor = isProfit ? '#F33140' : '#0F62FE';
 
-  // 4단계: 화면에 보여줄 '조회 기간' 텍스트를 예쁘게 만듭니다.
   let rangeText = "";
   if (filterMode === 'all') rangeText = "전체 기간 누적 데이터";
-  else if (filterMode === 'yearly') {
-    // 올해를 선택했다면 1월 1일부터 '오늘'까지를 보여주고, 과거 연도라면 12월 31일까지 보여줍니다.
-    rangeText = `${filterYear}.01.01 ~ ${filterYear === yyyy ? todayStr.replace(/-/g, '.') : filterYear + '.12.31'}`;
-  } 
+  else if (filterMode === 'yearly') rangeText = `${filterYear}.01.01 ~ ${filterYear === yyyy ? todayStr.replace(/-/g, '.') : filterYear + '.12.31'}`;
   else if (filterMode === 'monthly') rangeText = `${filterMonth.replace('-', '.')}.01 ~ 해당 월 말일`;
   else if (filterMode === 'daily') rangeText = `${filterDate.replace(/-/g, '.')}`;
   else if (filterMode === 'custom') rangeText = `${customStart.replace(/-/g, '.')} ~ ${customEnd.replace(/-/g, '.')}`;
@@ -323,25 +326,13 @@ function CompletedTab({ buyData, sellData }) {
         <h2 style={{ ...sectionTitleStyle, marginBottom: '0' }}>투자 수익 요약</h2>
       </div>
 
-      {/* 필터 컨트롤 UI 영역 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '10px', backgroundColor: '#FAFAFB', padding: '12px', borderRadius: '8px', border: '1px solid #E3E5E8' }}>
         <select value={filterMode} onChange={e => setFilterMode(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0', outline: 'none', backgroundColor: 'white' }}>
-          <option value="yearly">연별</option>
-          <option value="monthly">월별</option>
-          <option value="daily">일별</option>
-          <option value="custom">직접설정</option>
-          <option value="all">누적 (전체)</option>
+          <option value="yearly">연별</option><option value="monthly">월별</option><option value="daily">일별</option><option value="custom">직접설정</option><option value="all">누적 (전체)</option>
         </select>
-
-        {filterMode === 'yearly' && (
-          <input type="number" value={filterYear} onChange={e => setFilterYear(e.target.value)} style={{ padding: '8px', width: '80px', borderRadius: '4px', border: '1px solid #DADCE0' }} />
-        )}
-        {filterMode === 'monthly' && (
-          <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0' }} />
-        )}
-        {filterMode === 'daily' && (
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0' }} />
-        )}
+        {filterMode === 'yearly' && <input type="number" value={filterYear} onChange={e => setFilterYear(e.target.value)} style={{ padding: '8px', width: '80px', borderRadius: '4px', border: '1px solid #DADCE0' }} />}
+        {filterMode === 'monthly' && <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0' }} />}
+        {filterMode === 'daily' && <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0' }} />}
         {filterMode === 'custom' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} style={{ padding: '8px', borderRadius: '4px', border: '1px solid #DADCE0' }} />
@@ -351,28 +342,19 @@ function CompletedTab({ buyData, sellData }) {
         )}
       </div>
 
-      {/* 조회 기간 표시 텍스트 */}
-      <div style={{ fontSize: '12px', color: '#888888', marginBottom: '15px', letterSpacing: '-0.5px' }}>
-        조회 기간 : {rangeText}
-      </div>
+      <div style={{ fontSize: '12px', color: '#888888', marginBottom: '15px', letterSpacing: '-0.5px' }}>조회 기간 : {rangeText}</div>
 
-      {/* 요약 박스 (필터링된 결과물) */}
       <div style={{...summaryBoxStyle, backgroundColor: isProfit ? '#FFF8F8' : '#F5F8FF', borderColor: isProfit ? '#FFE2E5' : '#E5EEFF', marginBottom: '25px'}}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
           <span style={{ color: '#444444', fontSize: '14px', fontWeight: '600' }}>해당 기간 실현 수익금</span>
-          <strong style={{ fontSize: '22px', color: mainColor, letterSpacing: '-0.5px' }}>
-            {totalProfit > 0 ? '+' : ''}{Math.round(totalProfit).toLocaleString()}원
-          </strong>
+          <strong style={{ fontSize: '22px', color: mainColor, letterSpacing: '-0.5px' }}>{totalProfit > 0 ? '+' : ''}{Math.round(totalProfit).toLocaleString()}원</strong>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ color: '#666666', fontSize: '14px' }}>해당 기간 수익률</span>
-          <strong style={{ fontSize: '16px', color: mainColor }}>
-            {totalInvestedForSold ? ((totalProfit / totalInvestedForSold) * 100).toFixed(2) : 0}%
-          </strong>
+          <strong style={{ fontSize: '16px', color: mainColor }}>{totalInvestedForSold ? ((totalProfit / totalInvestedForSold) * 100).toFixed(2) : 0}%</strong>
         </div>
       </div>
 
-      {/* 필터링된 개별 데이터 리스트 */}
       <div style={{ overflowX: 'auto' }}>
         <table style={tableStyle}>
           <thead><tr><th style={thStyle}>매도일/환율</th><th style={thStyle}>달러</th><th style={{...thStyle, textAlign: 'right'}}>수익금</th></tr></thead>
@@ -382,14 +364,9 @@ function CompletedTab({ buyData, sellData }) {
             ) : (
               filteredRecords.map((record, idx) => (
                 <tr key={idx} style={trStyle}>
-                  <td style={tdStyle}>
-                    <div style={{ fontSize: '11px', color: '#888', marginBottom: '3px' }}>{record.sellDate}</div>
-                    <div style={{ fontSize: '14px' }}>{record.sellRate}</div>
-                  </td>
+                  <td style={tdStyle}><div style={{ fontSize: '11px', color: '#888', marginBottom: '3px' }}>{record.sellDate}</div><div style={{ fontSize: '14px' }}>{record.sellRate}</div></td>
                   <td style={tdStyle}>${record.sellUsd}</td>
-                  <td style={{...tdStyle, textAlign: 'right', fontWeight: '700', color: record.profit >= 0 ? '#F33140' : '#0F62FE'}}>
-                    {Math.round(record.profit).toLocaleString()}
-                  </td>
+                  <td style={{...tdStyle, textAlign: 'right', fontWeight: '700', color: record.profit >= 0 ? '#F33140' : '#0F62FE'}}>{Math.round(record.profit).toLocaleString()}</td>
                 </tr>
               ))
             )}
@@ -462,10 +439,7 @@ function ManageTab({ token, buyData, sellData, fetchSheetData }) {
                   <div style={{ fontSize: '12px', color: '#888888', marginBottom: '4px' }}>{buy[0]}</div>
                   <div style={{ fontSize: '15px', color: '#111111', fontWeight: '600' }}>{buy[3]}원 / <span style={{color: '#03C75A'}}>${buy[4]}</span></div>
                 </td>
-                <td style={{...tdStyle, textAlign: 'right', whiteSpace: 'nowrap'}}>
-                  <button onClick={() => handleEdit('buy', buy, idx)} style={editBtnStyle}>수정</button>
-                  <button onClick={() => handleDelete('buy', buy[0], idx)} style={deleteBtnStyle}>삭제</button>
-                </td>
+                <td style={{...tdStyle, textAlign: 'right', whiteSpace: 'nowrap'}}><button onClick={() => handleEdit('buy', buy, idx)} style={editBtnStyle}>수정</button><button onClick={() => handleDelete('buy', buy[0], idx)} style={deleteBtnStyle}>삭제</button></td>
               </tr>
             ))}
           </tbody>
@@ -483,10 +457,7 @@ function ManageTab({ token, buyData, sellData, fetchSheetData }) {
                   <div style={{ fontSize: '12px', color: '#888888', marginBottom: '4px' }}>연결: {sell[0]}</div>
                   <div style={{ fontSize: '15px', color: '#111111', fontWeight: '600' }}>{sell[2]}원 / <span style={{color: '#03C75A'}}>${sell[3]}</span></div>
                 </td>
-                <td style={{...tdStyle, textAlign: 'right', whiteSpace: 'nowrap'}}>
-                  <button onClick={() => handleEdit('sell', sell, idx)} style={editBtnStyle}>수정</button>
-                  <button onClick={() => handleDelete('sell', sell[0], idx)} style={deleteBtnStyle}>삭제</button>
-                </td>
+                <td style={{...tdStyle, textAlign: 'right', whiteSpace: 'nowrap'}}><button onClick={() => handleEdit('sell', sell, idx)} style={editBtnStyle}>수정</button><button onClick={() => handleDelete('sell', sell[0], idx)} style={deleteBtnStyle}>삭제</button></td>
               </tr>
             ))}
           </tbody>
@@ -514,9 +485,5 @@ const editBtnStyle = { padding: '7px 14px', backgroundColor: '#FFFFFF', color: '
 const deleteBtnStyle = { padding: '7px 14px', backgroundColor: '#FFFFFF', color: '#F33140', border: '1px solid #F33140', borderRadius: '4px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' };
 
 export default function Root() {
-  return (
-    <GoogleOAuthProvider clientId={CLIENT_ID}>
-      <DollarInvestApp />
-    </GoogleOAuthProvider>
-  );
+  return <DollarInvestApp />;
 }
