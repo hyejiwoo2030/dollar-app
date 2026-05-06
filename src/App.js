@@ -32,8 +32,9 @@ function DollarInvestApp() {
             const sellRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/매도기록!A3:G`, { headers: { Authorization: `Bearer ${token}` } });
             const buyJson = await buyRes.json();
             const sellJson = await sellRes.json();
-            setBuyData(buyJson.values ? buyJson.values.filter(r => r[0] && r[0].trim() !== '') : []); 
-            setSellData(sellJson.values ? sellJson.values.filter(r => r[0] && r[0].trim() !== '') : []);
+            const removeComma = (val) => typeof val === 'string' ? val.replace(/,/g, '') : val;
+            setBuyData(buyJson.values ? buyJson.values.filter(r => r[0] && r[0].trim() !== '').map(row => row.map(removeComma)) : []);
+            setSellData(sellJson.values ? sellJson.values.filter(r => r[0] && r[0].trim() !== '').map(row => row.map(removeComma)) : []);
           } catch (error) { console.error("데이터 읽기 실패", error); }
         };
         fetchData();
@@ -50,9 +51,10 @@ function DollarInvestApp() {
       const sellRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/매도기록!A3:G`, { headers: { Authorization: `Bearer ${token}` } });
       const buyJson = await buyRes.json();
       const sellJson = await sellRes.json();
+      const removeComma = (val) => typeof val === 'string' ? val.replace(/,/g, '') : val;
 
-      setBuyData(buyJson.values ? buyJson.values.filter(r => r[0] && r[0].trim() !== '') : []); 
-      setSellData(sellJson.values ? sellJson.values.filter(r => r[0] && r[0].trim() !== '') : []);
+      setBuyData(buyJson.values ? buyJson.values.filter(r => r[0] && r[0].trim() !== '').map(row => row.map(removeComma)) : []);
+      setSellData(sellJson.values ? sellJson.values.filter(r => r[0] && r[0].trim() !== '').map(row => row.map(removeComma)) : []);
     } catch (error) { console.error("데이터 읽기 실패", error); }
   };
 
