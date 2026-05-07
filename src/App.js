@@ -1,4 +1,5 @@
 // Vercel 강제 업데이트용 메모
+// Vercel 강제 업데이트용 메모
 // App.js 전체 코드 (진행+매도 탭 통합 및 데이터 가시성 강화 버전)
 import React, { useState, useEffect } from 'react';
 
